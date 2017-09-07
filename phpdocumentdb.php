@@ -325,12 +325,15 @@ class DocumentDB
       
            if($action == 'getInfo')                      $error = ($response['status'] != 200); 
       else if (0 === strpos($action, 'query'))           $error = ($response['status'] != 200); 
-      else if (0 === strpos($action, 'list'))            $error = ($response['status'] != 200); 
-      else if (0 === strpos($action, 'get'))             $error = ($response['status'] != 200 && $response['status'] != 404); 
+      else if (0 === strpos($action, 'list'))            $error = ($response['status'] != 200 && $response['status'] != 304); 
+      else if (0 === strpos($action, 'get'))             $error = ($response['status'] != 200 && $response['status'] != 304                                       
+                                                                                              && $response['status'] != 404); 
       else if (0 === strpos($action, 'create'))          $error = ($response['status'] != 201 && $response['status'] != 409);
-      else if (0 === strpos($action, 'replace'))         $error = ($response['status'] != 200 && $response['status'] != 404                                         
-                                                                                              && $response['status'] != 409);
-      else if (0 === strpos($action, 'delete'))          $error = ($response['status'] != 204 && $response['status'] != 404);
+      else if (0 === strpos($action, 'replace'))         $error = ($response['status'] != 200 && $response['status'] != 404                                       
+                                                                                              && $response['status'] != 409                                       
+                                                                                              && $response['status'] != 412);
+      else if (0 === strpos($action, 'delete'))          $error = ($response['status'] != 204 && $response['status'] != 404                                       
+                                                                                              && $response['status'] != 412); 
       else if (0 === strpos($action, 'execute'))         $error = ($response['status'] != 200);
       else                                               $error = ($response['status'] < 200  || $response['status']  > 409);
       
