@@ -118,7 +118,19 @@ class DocumentDBCollection
   {
     return $this->document_db->createDocument($this->rid_db, $this->rid_col, $json, $upsert);
   }
-
+  
+  /**
+   * listDocuments
+   *
+   * @access public
+   * @param string $if_none_match       Returns the ressource if the server ETag value does not match request ETag value, else "304 Not modified"
+   * @return string JSON response
+   */
+  public function listDocuments($if_none_match=null)
+  {
+    return $this->document_db->listDocuments($this->rid_db, $this->rid_col, $if_none_match);
+  }
+  
   /**
    * getDocument
    *
@@ -247,7 +259,6 @@ class DocumentDB
   private $host;
   private $master_key;
   private $error_handler;
-  private $session_token = null;
   
   /**
    * __construct
@@ -342,9 +353,6 @@ class DocumentDB
   {
     $request = new Http_Request2($this->host . $path);
     
-    if($this->session_token != null) 
-        $headers[] = 'x-ms-session-token:'.$this->session_token;
-    
     $request->setHeader($headers);
     
     if ($method === "GET") {
@@ -361,9 +369,7 @@ class DocumentDB
     }
     try
     {
-      $http_response = $request->send();
-      
-      $this->session_token = $http_response->getHeader('x-ms-session-token');
+      $http_response = $request->send();      
       
       $response = array(
         'status' => $http_response->getStatus(),
