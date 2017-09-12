@@ -28,6 +28,42 @@
  */
 require_once 'HTTP/Request2.php';
 
+class DocumentDBResult
+{
+    public $status;
+    public $header;
+    public $body;
+    public $data;
+    public $db_error;
+    public $json_error;
+    
+    public function __construct(int $status, array $header, string $body, $data, bool $db_error, int $json_error)
+    {
+        $this->status     = $status;
+        $this->header     = $header;
+        $this->body       = $body;
+        $this->data       = $data;
+        $this->db_error   = $db_error;
+        $this->json_error = $json_error;
+    }
+}
+
+class DocumentDBResponse
+{
+    public $status; // success, fail, error
+    public $data;
+    public $message;
+    public $code;
+    
+    public function __construct(string $status, $data, string $message = '', int $code = 0)
+    {
+        $this->status  = $status;
+        $this->data    = $data;
+        $this->message = $message;
+        $this->code    = $code;
+    }
+}
+
 class DocumentDBDatabase
 {
   private $document_db;
@@ -50,7 +86,7 @@ class DocumentDBDatabase
     $rid_col = false;
     $response = $this->document_db->listCollections($this->rid_db);
     
-    $col_list = $response['data']['DocumentCollections'];
+    $col_list = $response->data['DocumentCollections'];
     for ($i=0; $i<count($col_list); $i++) {
       if ($col_list[$i]['id'] === $col_name) {
         $rid_col = $col_list[$i]['_rid'];
@@ -63,12 +99,7 @@ class DocumentDBDatabase
     if ($rid_col) {
       return new DocumentDBCollection($this->document_db, $this->rid_db, $rid_col);
     } else {
-      return array(
-        'status' => 0,
-        'body'   => '',
-        'data'   => null,
-        'error'  => new Exception('This should never happen')
-      );
+      return $this->document_db->callErrorHandler($response, null);
     }
   }
 
@@ -260,6 +291,17 @@ class DocumentDB
   private $master_key;
   private $error_handler;
   
+  public static function defaultErrorHandler($response)
+  {
+    var_dump($response);
+    exit;
+  }
+  
+  public function callErrorHandler(...$params)
+  {
+      return call_user_func_array($this->error_handler, $params);
+  }
+  
   /**
    * __construct
    *
@@ -268,11 +310,11 @@ class DocumentDB
    * @param string $master_key      Primary or Secondary key
    * @param bool   $error_handler   Function to handle errors (default: null): function error_handler(array request)
    */
-  public function __construct($host, $master_key, $error_handler=null)
+  public function __construct($host, $master_key, $error_handler='DocumentDB/defaultErrorHandler')
   {
     $this->host          = $host;
     $this->master_key    = $master_key;
-    $this->error_handler = is_callable($error_handler) ? $error_handler : null;
+    $this->error_handler = $error_handler;
   }
 
   /**
@@ -319,23 +361,23 @@ class DocumentDB
    * @param string $response Response
    * @return bool error
    */
-  private function checkForErrors($action, $response)
+  private function checkForErrors(string $action, int $http_status_code)
   {
       $error = false;
       
-           if($action == 'getInfo')                      $error = ($response['status'] != 200); 
-      else if (0 === strpos($action, 'query'))           $error = ($response['status'] != 200); 
-      else if (0 === strpos($action, 'list'))            $error = ($response['status'] != 200 && $response['status'] != 304); 
-      else if (0 === strpos($action, 'get'))             $error = ($response['status'] != 200 && $response['status'] != 304                                       
-                                                                                              && $response['status'] != 404); 
-      else if (0 === strpos($action, 'create'))          $error = ($response['status'] != 201 && $response['status'] != 409);
-      else if (0 === strpos($action, 'replace'))         $error = ($response['status'] != 200 && $response['status'] != 404                                       
-                                                                                              && $response['status'] != 409                                       
-                                                                                              && $response['status'] != 412);
-      else if (0 === strpos($action, 'delete'))          $error = ($response['status'] != 204 && $response['status'] != 404                                       
-                                                                                              && $response['status'] != 412); 
-      else if (0 === strpos($action, 'execute'))         $error = ($response['status'] != 200);
-      else                                               $error = ($response['status'] < 200  || $response['status']  > 409);
+           if($action == 'getInfo')                      $error = ($http_status_code != 200); 
+      else if (0 === strpos($action, 'query'))           $error = ($http_status_code != 200); 
+      else if (0 === strpos($action, 'list'))            $error = ($http_status_code != 200 && $http_status_code != 304); 
+      else if (0 === strpos($action, 'get'))             $error = ($http_status_code != 200 && $http_status_code != 304                                       
+                                                                                            && $http_status_code != 404); 
+      else if (0 === strpos($action, 'create'))          $error = ($http_status_code != 201 && $http_status_code != 409);
+      else if (0 === strpos($action, 'replace'))         $error = ($http_status_code != 200 && $http_status_code != 404                                       
+                                                                                            && $http_status_code != 409                                       
+                                                                                            && $http_status_code != 412);
+      else if (0 === strpos($action, 'delete'))          $error = ($http_status_code != 204 && $http_status_code != 404                                       
+                                                                                            && $http_status_code != 412); 
+      else if (0 === strpos($action, 'execute'))         $error = ($http_status_code != 200);
+      else                                               $error = ($http_status_code < 200  || $http_status_code  > 409);
       
       return $error;
   }
@@ -352,50 +394,57 @@ class DocumentDB
    * @param string $body    request body (JSON or QUERY)
    * @return string JSON response
    */
-  private function request($path, $method, $headers, $body = NULL)
-  {
-    $request = new Http_Request2($this->host . $path);
-    
-    $request->setHeader($headers);
-    
-    if ($method === "GET") {
-      $request->setMethod(HTTP_Request2::METHOD_GET);
-    } else if ($method === "POST") {
-      $request->setMethod(HTTP_Request2::METHOD_POST);
-    } else if ($method === "PUT") {
-      $request->setMethod(HTTP_Request2::METHOD_PUT);
-    } else if ($method === "DELETE") {
-      $request->setMethod(HTTP_Request2::METHOD_DELETE);
-    }
-    if ($body) {
-      $request->setBody($body);
-    }
-    try
+    private function request($path, $method, $headers, $body = NULL)
     {
-      $http_response = $request->send();      
-      
-      $response = array(
-        'status' => $http_response->getStatus(),
-        'body'   => $http_response->getBody(),
-        'data'   => json_decode($http_response->getBody(), true),
-        'error'  => json_last_error()
-      );
+        $request = new Http_Request2($this->host . $path);
+
+        $request->setHeader($headers);
+
+        if ($method === "GET") {
+            $request->setMethod(HTTP_Request2::METHOD_GET);
+        } else if ($method === "POST") {
+            $request->setMethod(HTTP_Request2::METHOD_POST);
+        } else if ($method === "PUT") {
+            $request->setMethod(HTTP_Request2::METHOD_PUT);
+        } else if ($method === "DELETE") {
+            $request->setMethod(HTTP_Request2::METHOD_DELETE);
+        }
+        
+        if ($body) {
+            $request->setBody($body);
+        }
+        
+        $error = false;
+        
+        try
+        {
+            $http_response = $request->send();  
+
+            $body       = $http_response->getBody();
+            $data       = !empty($body) ? json_decode($body, true) : null;
+            $json_error = !empty($body) ? json_last_error()        : JSON_ERROR_NONE;
+            
+            $result   = new DocumentDBResult(
+                                $http_response->getStatus(), 
+                                $http_response->getHeader(), 
+                                $body,
+                                $data,
+                                $this->checkForErrors(debug_backtrace()[1]['function'], $http_response->getStatus()),
+                                $json_error
+                            );
+            $response = new DocumentDBResponse('success', $result);
+        }
+        catch (HttpException $ex)
+        {
+            $result   = null;
+            $response = new DocumentDBResponse('error', $ex, $ex->getMessage(), $ex->getCode());
+        }
+
+        if($response->status != 'success' || $response->data->db_error || $response->data->json_error)
+            $result = $this->callErrorHandler($response, $result);
+
+        return $result;
     }
-    catch (HttpException $ex)
-    {
-      $response = array(
-        'status' => 0,
-        'body'   => '',
-        'data'   => null,
-        'error'  => $ex
-      );
-    }
-    
-    if($this->checkForErrors(debug_backtrace()[1]['function'], $response))
-        $response = ($this->error_handler)($response);
-    
-    return $response;
-  }
 
   /**
    * selectDB
@@ -409,7 +458,7 @@ class DocumentDB
     $rid_db   = false;
     $response = $this->listDatabases();
     
-    $db_list = $response['data']['Databases'];
+    $db_list = $response->data['Databases'];
     for ($i=0; $i<count($db_list); $i++) {
       if ($db_list[$i]['id'] === $db_name) {
         $rid_db = $db_list[$i]['_rid'];
@@ -424,12 +473,7 @@ class DocumentDB
     if ($rid_db) {
       return new DocumentDBDatabase($this, $rid_db);
     } else {
-      return array(
-        'status' => 0,
-        'body'   => '',
-        'data'   => null,
-        'error'  => new Exception('This should never happen')
-      );
+      return $this->callErrorHandler($response, null);
     }
   }
 
