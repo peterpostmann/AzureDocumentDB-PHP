@@ -290,13 +290,27 @@ class DocumentDB
   private $host;
   private $master_key;
   private $error_handler;
-  
+
+  /**
+   * defaultErrorHandler
+   *
+   * @access public
+   * @param object $response      Response Data
+   * @return object Modified response Data
+   */
   public static function defaultErrorHandler($response)
   {
     var_dump($response);
     exit;
   }
   
+ /**
+   * callErrorHandler
+   *
+   * @access public
+   * @param varargs $params  Arguments to pass to the error handler
+   * @return object Modified response Data
+   */
   public function callErrorHandler(...$params)
   {
       return call_user_func_array($this->error_handler, $params);
