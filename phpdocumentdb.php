@@ -290,32 +290,8 @@ class DocumentDB
   private $host;
   private $master_key;
   private $error_handler;
+  private $request_charge = 0;
 
-  /**
-   * defaultErrorHandler
-   *
-   * @access public
-   * @param object $response      Response Data
-   * @return object Modified response Data
-   */
-  public static function defaultErrorHandler($response)
-  {
-    var_dump($response);
-    exit;
-  }
-  
- /**
-   * callErrorHandler
-   *
-   * @access public
-   * @param varargs $params  Arguments to pass to the error handler
-   * @return object Modified response Data
-   */
-  public function callErrorHandler(...$params)
-  {
-      return call_user_func_array($this->error_handler, $params);
-  }
-  
   /**
    * __construct
    *
@@ -365,6 +341,31 @@ class DocumentDB
              'x-ms-version: ' . $x_ms_version,
              'authorization: ' . urlencode("type=$master&ver=$token&sig=$sig")
            );
+  }
+
+  /**
+   * defaultErrorHandler
+   *
+   * @access public
+   * @param object $response      Response Data
+   * @return object Modified response Data
+   */
+  public static function defaultErrorHandler($response)
+  {
+    var_dump($response);
+    exit;
+  }
+  
+ /**
+   * callErrorHandler
+   *
+   * @access public
+   * @param varargs $params  Arguments to pass to the error handler
+   * @return object Modified response Data
+   */
+  public function callErrorHandler(...$params)
+  {
+      return call_user_func_array($this->error_handler, $params);
   }
   
   /**
@@ -446,6 +447,9 @@ class DocumentDB
                                 $this->checkForErrors(debug_backtrace()[1]['function'], $http_response->getStatus()),
                                 $json_error
                             );
+                            
+            $this->request_charge += ($http_response->getHeader('x-ms-request-charge') ? $http_response->getHeader('x-ms-request-charge') : 0);
+                            
             $response = new DocumentDBResponse('success', $result);
         }
         catch (HttpException $ex)
@@ -459,7 +463,12 @@ class DocumentDB
 
         return $result;
     }
-
+    
+    public function getCharge()
+    {
+        return $this->request_charge;
+    }
+    
   /**
    * selectDB
    *
