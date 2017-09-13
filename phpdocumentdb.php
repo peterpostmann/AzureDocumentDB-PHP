@@ -94,7 +94,7 @@ class DocumentDBDatabase
     }
     if (!$rid_col) {
       $response = $this->document_db->createCollection($this->rid_db, '{"id":"' . $col_name . '"}');
-      $rid_col = $response['data']['_rid'];
+      $rid_col = $response->data['_rid'];
     }
     if ($rid_col) {
       return new DocumentDBCollection($this->document_db, $this->rid_db, $rid_col);
@@ -467,7 +467,7 @@ class DocumentDB
     
     if (!$rid_db) {  
       $response = $this->createDatabase('{"id":"' . $db_name . '"}');
-      $rid_db = $response['data']['_rid'];
+      $rid_db = $response->data['_rid'];
     }
     
     if ($rid_db) {
