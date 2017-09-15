@@ -498,7 +498,22 @@ class DocumentDB
     } else {
       return $this->callErrorHandler($response, null);
     }
-  }
+  }  
+  
+   /**
+    * selectCollection
+    *
+    * @access public
+    * @param string $db_name     Database name
+    * @param string $col_name Collection name
+    * @return DocumentDBCollection class
+    */
+    public function selectCollection(string $db_name, string $col_name)
+    {
+        $db = $this->selectDB($db_name);
+        
+        return $db ? $db->selectCollection($col_name) : null;
+    }
 
   /**
    * getInfo
