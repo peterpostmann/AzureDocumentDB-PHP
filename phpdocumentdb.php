@@ -64,45 +64,98 @@ class DocumentDBResponse
     }
 }
 
+class ResultCache
+{
+    private $self;
+    private $cache;
+    private $enable;
+    private $func_list;
+    private $func_create;
+
+    public function __construct($self, bool $enable=true, $func_list, $func_create)
+    {
+        $this->self        = $self;
+        $this->enable      = $enable;
+        $this->cache       = array();
+        $this->func_list   = $func_list   ? $func_list : null;
+        $this->func_create = $func_create ? $func_create : null;
+    }
+    
+    public function get($id) : string
+    {        
+        $result = isset($this->cache[$id]) ? $this->cache[$id] : '';
+
+        if(!$result && $this->func_list)
+        {
+            $list = call_user_func($this->func_list, $this->self);
+            
+            foreach($list as $row)
+            {
+                if ($row['id'] === $id) $result = $row['_rid'];
+                if($this->enable) $this->cache[$row['id']] = $row['_rid'];
+            }
+        }
+        
+        if(!$result && $this->func_list)
+        {
+            $result = call_user_func($this->func_create, $this->self, $id);
+            if($this->enable) $this->cache[$id] = $result;
+        }
+        
+        return $result;
+    }    
+}
+
 class DocumentDBDatabase
 {
-  private $document_db;
-  private $rid_db;
+    private $document_db;
+    private $rid_db;
+    private $cache;
 
-  public function __construct($document_db, $rid_db)
-  {
-    $this->document_db = $document_db;
-    $this->rid_db      = $rid_db;
-  }
-
-  /**
-   * selectCollection
-   *
-   * @access public
-   * @param string $col_name Collection name
-   */
-  public function selectCollection($col_name)
-  {
-    $rid_col = false;
-    $response = $this->document_db->listCollections($this->rid_db);
+    public function __construct($document_db, $rid_db, $enableCache=false)
+    {
+        $this->document_db = $document_db;
+        $this->rid_db      = $rid_db;
+        $this->cache       = new ResultCache($this, $enableCache, ['DocumentDBDatabase', 'listCollections'], ['DocumentDBDatabase', 'createCollection']);
+    }
+      
+   /**
+    * listCollections
+    *
+    * @access public
+    */
+    public static function listCollections($col) : array
+    {
+        $response = $col->document_db->listCollections($col->rid_db);    
+        if(!isset($response->data['DocumentCollections'])) return $col->document_db->callErrorHandler($response, array()); 
+        return $response->data['DocumentCollections'];
+    }
+     
+   /**
+    * createCollection
+    *
+    * @access public
+    * @param string $col_name Collection name
+    */   
+    public static function createCollection($col, $col_name) : string
+    {
+        $response = $col->document_db->createCollection($col->rid_db, '{"id":"' . $col_name . '"}');
+        if(!isset($response->data['_rid'])) return $col->document_db->callErrorHandler($response, ''); 
+        return $response->data['_rid'];
+    }
     
-    $col_list = $response->data['DocumentCollections'];
-    for ($i=0; $i<count($col_list); $i++) {
-      if ($col_list[$i]['id'] === $col_name) {
-        $rid_col = $col_list[$i]['_rid'];
-      }
+   /**
+    * selectCollection
+    *
+    * @access public
+    * @param string $col_name Collection name
+    */
+    public function selectCollection($col_name)
+    {
+        $rid_col = $this->cache->get($col_name);
+        if ($rid_col) return new DocumentDBCollection($this->document_db, $this->rid_db, $rid_col);
+        else          return $this->document_db->callErrorHandler(null, null);
     }
-    if (!$rid_col) {
-      $response = $this->document_db->createCollection($this->rid_db, '{"id":"' . $col_name . '"}');
-      $rid_col = $response->data['_rid'];
-    }
-    if ($rid_col) {
-      return new DocumentDBCollection($this->document_db, $this->rid_db, $rid_col);
-    } else {
-      return $this->document_db->callErrorHandler($response, null);
-    }
-  }
-
 }
 
 class DocumentDBCollection
@@ -289,23 +342,35 @@ class DocumentDB
 {
   private $host;
   private $master_key;
-  private $error_handler;
+  private $error_handler  = ['DocumentDB','defaultErrorHandler'];
   private $request_charge = 0;
+  private $enableCache    = false;
+  private $cache;
 
   /**
-   * __construct
-   *
-   * @access public
-   * @param string $host            URI of Key
-   * @param string $master_key      Primary or Secondary key
-   * @param bool   $error_handler   Function to handle errors (default: null): function error_handler(array request)
-   */
-  public function __construct($host, $master_key, $error_handler='DocumentDB/defaultErrorHandler')
-  {
-    $this->host          = $host;
-    $this->master_key    = $master_key;
-    $this->error_handler = $error_handler;
-  }
+    * __construct
+    *
+    * @access public
+    * @param string   $host            URI of Key
+    * @param string   $master_key      Primary or Secondary key
+    * @param array    $options         Configuration
+    *        callable  error_handler   Function to handle errors
+    *        bool      enableCache     Enable result caching
+    */
+    public function __construct($host, $master_key, $options=array())
+    {
+        $this->host          = $host;
+        $this->master_key    = $master_key;
+
+        $available_options = array('enableCache', 'error_handler');
+        foreach ($available_options as $name) {
+            if (isset($options[$name])) {
+                $this->$name = $options[$name];
+            }
+        }
+        
+        $this->cache = new ResultCache($this, $this->enableCache, ['DocumentDB','_listDatabases'], ['DocumentDB','_createDatabase']);
+    }
 
   /**
    * getAuthHeaders
@@ -464,41 +529,30 @@ class DocumentDB
         return $result;
     }
     
+   /**
+    * getCharge
+    *
+    * @return String Total RU consumed
+    */
     public function getCharge()
     {
         return $this->request_charge;
     }
-    
-  /**
-   * selectDB
-   *
-   * @access public
-   * @param string $db_name Database name
-   * @return DocumentDBDatabase class
-   */
-  public function selectDB($db_name)
-  {
-    $rid_db   = false;
-    $response = $this->listDatabases();
-    
-    $db_list = $response->data['Databases'];
-    for ($i=0; $i<count($db_list); $i++) {
-      if ($db_list[$i]['id'] === $db_name) {
-        $rid_db = $db_list[$i]['_rid'];
-      }
+
+   /**
+    * selectDB
+    *
+    * @access public
+    * @param string $db_name Database name
+    * @return DocumentDBDatabase class
+    */
+    public function selectDB($db_name)
+    {
+        $rid_db   = $this->cache->get($db_name);
+        
+        if ($rid_db) return new DocumentDBDatabase($this, $rid_db);
+        else         $this->callErrorHandler(null, null);
     }
-    
-    if (!$rid_db) {  
-      $response = $this->createDatabase('{"id":"' . $db_name . '"}');
-      $rid_db = $response->data['_rid'];
-    }
-    
-    if ($rid_db) {
-      return new DocumentDBDatabase($this, $rid_db);
-    } else {
-      return $this->callErrorHandler($response, null);
-    }
-  }  
   
    /**
     * selectCollection
@@ -563,6 +617,19 @@ class DocumentDB
     if($if_none_match != null) $headers[] = 'If-None-Match:'.$if_none_match;
     return $this->request("/dbs", "GET", $headers);
   }
+  
+  /**
+   * _listDatabases
+   *
+   * @access public
+   * @return array databases
+   */
+    public static function _listDatabases(DocumentDB $db) : array
+    {
+        $response = $db->listDatabases();
+        if(!isset($response->data['Databases'])) return $db->callErrorHandler($response, array()); 
+        else return $response->data['Databases'];
+    }
 
   /**
    * getDatabase
@@ -594,7 +661,22 @@ class DocumentDB
     $headers = $this->getAuthHeaders('POST', 'dbs', '');
     $headers[] = 'Content-Length:' . strlen($json);
     return $this->request("/dbs", "POST", $headers, $json);
-  }
+  } 
+
+  /**
+   * createDatabase
+   *
+   * @link http://msdn.microsoft.com/en-us/library/azure/dn803954.aspx
+   * @access public
+   * @param string $json JSON request
+   * @return string JSON response
+   */
+    public static function _createDatabase(DocumentDB $db, string $db_name) : string
+    {
+        $response = $db->createDatabase('{"id":"' . $db_name . '"}');
+        if(!isset($response->data['_rid'])) return $db->callErrorHandler($response, ''); 
+        return $response->data['_rid'];
+    }
 
   /**
    * replaceDatabase
